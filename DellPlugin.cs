@@ -18,31 +18,74 @@ namespace FanControl.DellPlugin
 
         public string Name => "Dell";
 
-        public DellPlugin(IPluginLogger logger)
-        {
-            _logger = logger;
-        }
+        public DellPlugin( IPluginLogger logger ) { _logger = logger; }
 
         public void Close()
         {
             if (_dellInitialized)
             {
                 Debug.WriteLine("[DellPlugin] Closing down plugin...");
-                
+
                 // Enable Automatic Fan Control (i.e. revert to on-board controller):
-                DellSmbiosBzh.EnableAutomaticFanControl(true); // >> Alternate method
-                DellSmbiosBzh.EnableAutomaticFanControl(false); // >> Default method
-                Debug.WriteLine("[DellPlugin] Automatic fan control re-enabled.");
+                try
+                {
+                    Debug.WriteLine("[DellPlugin] Attempting to enable automatic fan controller:");
+                    bool autoEnabled = DellSmbiosBzh.EnableAutomaticFanControl(false);
+                    if (!autoEnabled)
+                    {
+                        // Default method failed > Try alternate method
+                        autoEnabled = DellSmbiosBzh.EnableAutomaticFanControl(true);
+                        if (!autoEnabled)
+                        {
+                            // Alternate method failed! > Consider disabling automatic fan control?
+                            // e.g. DellSmbiosBzh.DisableAutomaticFanControl(false/true);
+                            // -> Q: Would this preserve fans current speed or make them run at full-speed until next reboot?
+                            Debug.WriteLine("[DellPlugin] - Failed!");
+                        }
+                        else
+                            Debug.WriteLine("[DellPlugin] - Succeeded using alternate method.");
+                    }
+                    else
+                        Debug.WriteLine("[DellPlugin] - Success!");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log($"[DellPlugin] Unable to restore automatic fan control during close: {ex.Message}");
+                    Debug.WriteLine($"[DellPlugin] Exception while enabling automatic fan control: {ex}");
+                }
                 
                 // Shutdown DellSmbiosBzh interface:
-                DellSmbiosBzh.Shutdown();
-                Debug.WriteLine("[DellPlugin] SMBios interface shutdown.");
+                try
+                {
+                    Debug.WriteLine("[DellPlugin] Attempting to shut down DellSmbiosBzh interface:");
+                    DellSmbiosBzh.Shutdown();
+                    Debug.WriteLine("[DellPlugin] - Success!");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log($"[DellPlugin] Exception during DellSmbiosBzh shutdown: {ex.GetType().Name}: {ex.Message}");
+                    Debug.WriteLine($"[DellPlugin] Exception during SMBIOS driver shutdown: {ex}");
+                }
                 
                 // Clean-up File System:
-                _copiedSysFile.Delete();
-                // NOTE: "If the file to be deleted does not exist, no exception is thrown."
-                // -> Ref: https://learn.microsoft.com/en-us/dotnet/api/system.io.file.delete?view=net-10.0
-                Debug.WriteLine("[DellPlugin] Session driver file deleted.");
+                string fileLocation = Path.Combine(Directory.GetCurrentDirectory(), SYS_FILE);
+                try
+                {
+                    Debug.WriteLine($"[DellPlugin] Attempting to delete session driver file '{SYS_FILE}' from: {_copiedSysFile.DirectoryName}");
+                    _copiedSysFile.Delete();
+                    // NOTE: "If the file to be deleted does not exist, no exception is thrown."
+                    // -> Ref: https://learn.microsoft.com/en-us/dotnet/api/system.io.file.delete?view=net-10.0
+                    // >> That is not to say that exceptions aren't thrown from other causes!
+                    Debug.WriteLine("[DellPlugin] - Success!");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    throw new UnauthorizedAccessException($"[DellPlugin] Access denied when deleting sys file from {fileLocation}.", ex);
+                }
+                catch (IOException ex)
+                {
+                    throw new IOException($"[DellPlugin] IO error when deleting sys file from {fileLocation}: {ex.Message}", ex);
+                }
 
                 // Clear variables:
                 _copiedSysFile = null;
