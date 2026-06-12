@@ -14,8 +14,14 @@ namespace FanControl.DellPlugin
         private bool _dellInitialized;
         private FileInfo _copiedSysFile;
         private Boolean m_DisposedValue;
+        private readonly IPluginLogger _logger;
 
         public string Name => "Dell";
+
+        public DellPlugin(IPluginLogger logger)
+        {
+            _logger = logger;
+        }
 
         public void Close()
         {

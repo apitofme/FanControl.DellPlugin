@@ -31,12 +31,10 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="DellSmbiosBzhLib, Version=0.0.0.0, Culture=neutral, processorArchitecture=AMD64">
-      <SpecificVersion>False</SpecificVersion>
+    <Reference Include="DellSmbiosBzhLib">
       <HintPath>Dlls\DellSmbiosBzhLib.dll</HintPath>
     </Reference>
-    <Reference Include="FanControl.Plugins, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
+    <Reference Include="FanControl.Plugins">
       <HintPath>Dlls\FanControl.Plugins.dll</HintPath>
     </Reference>
     <Reference Include="System" />
