@@ -100,30 +100,102 @@ namespace FanControl.DellPlugin
 
         public void Initialize()
         {
-            Debug.WriteLine("[DellPlugin] Initializing plugin...");
-            var copyLocation = Path.Combine(Directory.GetCurrentDirectory(), SYS_FILE);
-
-            // Delete any residual copy of sys file (i.e. from bad shutdown):
-            if (File.Exists(copyLocation))
+            if (!_dellInitialized)
             {
-                Debug.WriteLine(
-                    $"[DellPlugin] Driver file already exists at: {copyLocation}.\n"
-                    + "Note: This may indicate the program previously crashed or there was an unsuccessful shutdown.\n"
-                    + "- Will attempt to delete residual driver file."
-                );
-                File.Delete(copyLocation);
-            }
+                Debug.WriteLine("[DellPlugin] Initializing plugin...");
 
-            // Copy the driver file from plugin to application:
-            FileInfo sysFile = new FileInfo(typeof(DellSmbiosBzh).Assembly.Location).Directory.GetFiles(SYS_FILE).FirstOrDefault();
-            _copiedSysFile = sysFile.CopyTo(copyLocation, true);
-            // Note: "If the file exists and overwrite is false, an IOException is thrown."
-            // -> Ref: https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.copyto?view=net-10.0
+                // NOTE: The DellSmbiosBzh driver expects 'bzh_dell_smm_io_x64.sys' to be in `Directory.GetCurrentDirectory()`
+                // -> i.e. In the host application's base directory
+                // >> This is a limitation of the DellFanManagement library (hardcoded driver path)!
+                string copyLocation = Path.Combine(Directory.GetCurrentDirectory(), SYS_FILE);
+
+                // Delete any residual copy of sys file (i.e. from bad shutdown):
+                if (File.Exists(copyLocation))
+                {
+                    Debug.WriteLine(
+                        $"[DellPlugin] Driver file already exists at: {copyLocation}.\n"
+                        + "Note: This may indicate the program previously crashed or there was an unsuccessful shutdown."
+                    );
+                    try
+                    {
+                        Debug.WriteLine($"[DellPlugin] Attempting to delete residual driver file:");
+                        File.Delete(copyLocation);
+                        Debug.WriteLine("[DellPlugin] - Success!");
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        throw new UnauthorizedAccessException($"[DellPlugin] Access denied when deleting file from {copyLocation}.", ex);
+                    }
+                    catch (IOException ex)
+                    {
+                        throw new IOException($"[DellPlugin] IO error when deleting file from {copyLocation}: {ex.Message}", ex);
+                    }
+                }
+
+                try
+                {
+                    // Locate driver file in plugin directory:
+                    Debug.WriteLine("[DellPlugin] Locating DellSmbiosBzh driver file from plugin directory:");
+                    FileInfo sysFile = new FileInfo(typeof(DellSmbiosBzh).Assembly.Location).Directory.GetFiles(SYS_FILE).FirstOrDefault();
+                    Debug.WriteLine("[DellPlugin] - Success!");
+                    
+                    // Copy driver file to application directory
+                    Debug.WriteLine("[DellPlugin] Attempting to copy driver file to application directory:");
+                    _copiedSysFile = sysFile.CopyTo(copyLocation, true);
+                    // Note: "If the file exists and overwrite is false, an IOException is thrown."
+                    // -> Ref: https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.copyto?view=net-10.0
+                    Debug.WriteLine("[DellPlugin] - Success!");
+                }
+                catch (FileNotFoundException ex)
+                {
+                    throw new FileNotFoundException(
+                            $"[DellPlugin] Could not find '{SYS_FILE}' in plugin source directory. "
+                            + "Ensure plugin is properly installed and directory is accessible.",
+                            ex);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"[DellPlugin] Access denied when copying sys file to {copyLocation}. " +
+                        "Ensure the application has write permissions to the current directory.",
+                        ex);
+                }
+                catch (IOException ex)
+                {
+                    throw new IOException($"[DellPlugin] IO error when copying sys file to {copyLocation}: {ex.Message}", ex);
+                }
+                
+                // Initialize the Dell SMBIOS interface:
+                try
+                {
+                    Debug.WriteLine("[DellPlugin] Attempting to initialize Dell SMBIOS interface:");
+                    _dellInitialized = DellSmbiosBzh.Initialize();
+
+                    if (_dellInitialized)
+                        Debug.WriteLine("[DellPlugin] - Success!");
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            "DellSmbiosBzh.Initialize() returned false. " +
+                            "This may indicate the system is not a supported Dell laptop or SMBIOS access is unavailable.");
+                    }
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.Log($"[DellPlugin] Failed to initialize SMBIOS driver interface: {ex.Message}");
+                    Debug.WriteLine($"[DellPlugin] Exception during SMBIOS driver initialize: {ex}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log($"[DellPlugin] Exception during DellSmbiosBzh initialize: {ex.GetType().Name}: {ex.Message}");
+                    Debug.WriteLine($"[DellPlugin] Exception during SMBIOS driver initialize: {ex}");
+                }
+                
+                Debug.WriteLine("[DellPlugin] << Initialize() complete!");
+            }
             
-            // Initialize the Dell SMBios interface:
-            _dellInitialized = DellSmbiosBzh.Initialize();
-            
-            Debug.WriteLine("[DellPlugin] << Initialize() complete!");
+            else
+                Debug.WriteLine("[DellPlugin] Initialize() called but plugin already initialized.");
         }
 
         public void Load(IPluginSensorsContainer _container)
