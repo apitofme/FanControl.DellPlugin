@@ -204,19 +204,65 @@ namespace FanControl.DellPlugin
             {
                 Debug.WriteLine("[DellPlugin] Loading Fan Management...");
                 
-                // Create and register fan sensors and controls:
-                IEnumerable<DellFanManagementControlSensor> fanControls = new[] {
-                            BzhFanIndex.Fan1,
-                            BzhFanIndex.Fan2
-                        }.Select(i => new DellFanManagementControlSensor(i)).ToArray();
-                
-                IEnumerable<DellFanManagementFanSensor> fanSensors = new[] {
-                            BzhFanIndex.Fan1,
-                            BzhFanIndex.Fan2
-                        }.Select(i => new DellFanManagementFanSensor(i)).ToArray();
+                try
+                {
+                    Debug.WriteLine("[DellPlugin] Auto-detecting available fans:");
+                    var detectedFans = new List<BzhFanIndex>();
 
-                _container.ControlSensors.AddRange(fanControls);
-                _container.FanSensors.AddRange(fanSensors);
+                    // Iterate through all defined fan indices:
+                    foreach (BzhFanIndex fanIndex in Enum.GetValues(typeof(BzhFanIndex)))
+                    {
+                        try
+                        {
+                            float? rpm = DellSmbiosBzh.GetFanRpm(fanIndex);
+                            
+                            // Fan exists if we got a valid RPM (even if 0).
+                            if (rpm.HasValue)
+                            {
+                                detectedFans.Add(fanIndex);
+                                Debug.WriteLine($"[DellPlugin] - {fanIndex}: Detected (RPM: {rpm})");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[DellPlugin] - {fanIndex}: Not available - {ex.GetType().Name}");
+                        }
+                    }
+
+                    if (detectedFans.Count == 0)
+                    {
+                        Debug.WriteLine("[DellPlugin] WARNING: No fans detected! Falling back to defaults (i.e. Fan1 and Fan2).");
+                        detectedFans.AddRange(new[] { BzhFanIndex.Fan1, BzhFanIndex.Fan2 });
+                    }
+                    else
+                        Debug.WriteLine($"[DellPlugin] - Success! Total fans detected: {detectedFans.Count}");
+
+                    // Register controls and sensors for all fans:
+                    Debug.WriteLine("[DellPlugin] Registering fan controls:");
+                    var fanControls = detectedFans
+                        .Select(i => new DellFanManagementControlSensor(i))
+                        .ToList();
+                    Debug.WriteLine("[DellPlugin] - Success!");
+
+                    Debug.WriteLine("[DellPlugin] Registering fan sensors:");
+                    var fanSensors = detectedFans
+                        .Select(i => new DellFanManagementFanSensor(i))
+                        .ToList();
+                    Debug.WriteLine("[DellPlugin] - Success!");
+
+                    // Inject controls and sensors in to host application:
+                    Debug.WriteLine("[DellPlugin] Injecting controls and sensors in to host:");
+                    _container.ControlSensors.AddRange(fanControls);
+                    _container.FanSensors.AddRange(fanSensors);
+
+                    Debug.WriteLine($"[DellPlugin] - Success! {fanControls.Count} controls and {fanSensors.Count} fan sensors loaded.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log($"[DellPlugin] Error during Load(): {ex.Message}");
+                    Debug.WriteLine($"[DellPlugin] Load() failed with an exception: {ex}");
+                    throw;
+                }
 
                 Debug.WriteLine("[DellPlugin] << Load() complete!");
             }
