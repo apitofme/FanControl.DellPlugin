@@ -191,6 +191,16 @@ namespace FanControl.DellPlugin
                     Debug.WriteLine($"[DellPlugin] Exception during SMBIOS driver initialize: {ex}");
                 }
                 
+                // Disable system fan control before application takes over (ensure no conflicting signals).
+                Debug.WriteLine("[DellPlugin] Attempting to **disable** automatic fan control:");
+                if (!DellSmbiosBzh.DisableAutomaticFanControl(false))
+                    if (!DellSmbiosBzh.DisableAutomaticFanControl(true))
+                        Debug.WriteLine("[DellPlugin] - Failed!");
+                    else
+                        Debug.WriteLine("[DellPlugin] - Succeeded using alternate method.");
+                else
+                    Debug.WriteLine("[DellPlugin] - Success!");
+
                 Debug.WriteLine("[DellPlugin] << Initialize() complete!");
             }
             
