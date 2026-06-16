@@ -66,26 +66,6 @@ namespace FanControl.DellPlugin
                     _logger.Log($"[DellPlugin] Exception during DellSmbiosBzh shutdown: {ex.GetType().Name}: {ex.Message}");
                     Debug.WriteLine($"[DellPlugin] Exception during SMBIOS driver shutdown: {ex}");
                 }
-                
-                // Clean-up File System:
-                string fileLocation = Path.Combine(Directory.GetCurrentDirectory(), SYS_FILE);
-                try
-                {
-                    Debug.WriteLine($"[DellPlugin] Attempting to delete session driver file '{SYS_FILE}' from: {_copiedSysFile.DirectoryName}");
-                    _copiedSysFile.Delete();
-                    // NOTE: "If the file to be deleted does not exist, no exception is thrown."
-                    // -> Ref: https://learn.microsoft.com/en-us/dotnet/api/system.io.file.delete?view=net-10.0
-                    // >> That is not to say that exceptions aren't thrown from other causes!
-                    Debug.WriteLine("[DellPlugin] - Success!");
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    throw new UnauthorizedAccessException($"[DellPlugin] Access denied when deleting sys file from {fileLocation}.", ex);
-                }
-                catch (IOException ex)
-                {
-                    throw new IOException($"[DellPlugin] IO error when deleting sys file from {fileLocation}: {ex.Message}", ex);
-                }
 
                 // Clear variables:
                 _copiedSysFile = null;
@@ -102,69 +82,79 @@ namespace FanControl.DellPlugin
         {
             if (!_dellInitialized)
             {
-                Debug.WriteLine("[DellPlugin] Initializing plugin...");
+                Debug.WriteLine("\n[DellPlugin] Initializing plugin...");
 
-                // NOTE: The DellSmbiosBzh driver expects 'bzh_dell_smm_io_x64.sys' to be in `Directory.GetCurrentDirectory()`
-                // -> i.e. In the host application's base directory
-                // >> This is a limitation of the DellFanManagement library (hardcoded driver path)!
+                // NOTE: The DellFanManagement library [DellSmbiosBzhLib.dll] expects the driver-file [bzh_dell_smm_io_x64.sys]
+                // to be in the host application's base-directory. This is a limitation of the source library (hardcoded path),
+                // so we must ensure that this file is present - i.e. copy from Plugin directory (if required)!
+
+                // Locate driver source file in plugin directory:
+                FileInfo sourceFile = new FileInfo(typeof(DellSmbiosBzh).Assembly.Location).Directory.GetFiles(SYS_FILE).FirstOrDefault() ?? throw new FileNotFoundException(
+                    $"[DellPlugin] Could not find {SYS_FILE} in DellFanManagement assembly directory. "
+                    + "Ensure DellPlugin package is properly installed.");
+                
+                // Configure destination for copy operation:
                 string copyLocation = Path.Combine(Directory.GetCurrentDirectory(), SYS_FILE);
 
-                // Delete any residual copy of sys file (i.e. from bad shutdown):
-                if (File.Exists(copyLocation))
+                // Verify if the driver file exists/needs copying or needs updating (overwrite existing copy):
+                bool needsCopy = false;
+                if (!File.Exists(copyLocation))
                 {
-                    Debug.WriteLine(
-                        $"[DellPlugin] Driver file already exists at: {copyLocation}.\n"
-                        + "Note: This may indicate the program previously crashed or there was an unsuccessful shutdown."
-                    );
+                    Debug.WriteLine($"[DellPlugin] WARNING Driver file not found in expected location '{copyLocation}'!");
+                    needsCopy = true;
+                }
+                else
+                {
+                    Debug.WriteLine($"[DellPlugin] Existing driver file located.");
+
+                    // Compare timestamps to detect if source has been updated:
+                    Debug.WriteLine("[DellPlugin] Verifying driver...");
+                    FileInfo targetFile = new FileInfo(copyLocation);
+                    if (sourceFile.LastWriteTime > targetFile.LastWriteTime)
+                    {
+                        Debug.WriteLine("[DellPlugin] WARNING: Driver file is out of date!");
+                        needsCopy = true;
+                    }
+                    else
+                        Debug.WriteLine("[DellPlugin] PASS: Existing file matches the plugin source.");
+                    // NOTE: Not checking on file-size as if the file size differs then the LastWriteTime would too (in theory).
+                    // -> I think the only way it wouldn't is if someone changed the file but force-set the LWT to the same value(?).
+                }
+
+                if (needsCopy)
+                {
+                    // Driver file is missing or out of date so copy source file from plugin to application directory:
                     try
                     {
-                        Debug.WriteLine($"[DellPlugin] Attempting to delete residual driver file:");
-                        File.Delete(copyLocation);
+                        Debug.WriteLine("[DellPlugin] Attempting to copy driver file from source:");
+                        _copiedSysFile = sourceFile.CopyTo(copyLocation, true);
                         Debug.WriteLine("[DellPlugin] - Success!");
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        throw new FileNotFoundException(
+                                $"[DellPlugin] Could not find '{SYS_FILE}' in plugin source directory. "
+                                + "Ensure plugin is properly installed and directory is accessible.",
+                                ex);
                     }
                     catch (UnauthorizedAccessException ex)
                     {
-                        throw new UnauthorizedAccessException($"[DellPlugin] Access denied when deleting file from {copyLocation}.", ex);
+                        throw new UnauthorizedAccessException(
+                            $"[DellPlugin] Access denied when copying driver file to {copyLocation}. "
+                            + "Ensure the application has write permissions to the current directory.",
+                            ex);
                     }
                     catch (IOException ex)
                     {
-                        throw new IOException($"[DellPlugin] IO error when deleting file from {copyLocation}: {ex.Message}", ex);
+                        throw new IOException($"[DellPlugin] IO error when copying driver file to {copyLocation}: {ex.Message}", ex);
                     }
                 }
+                else
+                {
+                    // Driver file already exists and is up to date so simply store the reference to existing file:
+                    _copiedSysFile = new FileInfo(copyLocation);
+                }
 
-                try
-                {
-                    // Locate driver file in plugin directory:
-                    Debug.WriteLine("[DellPlugin] Locating DellSmbiosBzh driver file from plugin directory:");
-                    FileInfo sysFile = new FileInfo(typeof(DellSmbiosBzh).Assembly.Location).Directory.GetFiles(SYS_FILE).FirstOrDefault();
-                    Debug.WriteLine("[DellPlugin] - Success!");
-                    
-                    // Copy driver file to application directory
-                    Debug.WriteLine("[DellPlugin] Attempting to copy driver file to application directory:");
-                    _copiedSysFile = sysFile.CopyTo(copyLocation, true);
-                    // Note: "If the file exists and overwrite is false, an IOException is thrown."
-                    // -> Ref: https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.copyto?view=net-10.0
-                    Debug.WriteLine("[DellPlugin] - Success!");
-                }
-                catch (FileNotFoundException ex)
-                {
-                    throw new FileNotFoundException(
-                            $"[DellPlugin] Could not find '{SYS_FILE}' in plugin source directory. "
-                            + "Ensure plugin is properly installed and directory is accessible.",
-                            ex);
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    throw new UnauthorizedAccessException(
-                        $"[DellPlugin] Access denied when copying sys file to {copyLocation}. " +
-                        "Ensure the application has write permissions to the current directory.",
-                        ex);
-                }
-                catch (IOException ex)
-                {
-                    throw new IOException($"[DellPlugin] IO error when copying sys file to {copyLocation}: {ex.Message}", ex);
-                }
-                
                 // Initialize the Dell SMBIOS interface:
                 try
                 {
